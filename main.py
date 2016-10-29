@@ -12,7 +12,7 @@ import requests
 import pickle
 import datetime
 import hashlib
-
+import signal
 
 CACHE = {}
 
@@ -86,7 +86,7 @@ class Proxy(object):
         # request.headers["Connection"] = "keep-alive"
         request.reassemble()
         try:
-            sock.connect((request.headers["Host"], 80))
+            sock.connect((request.headers["Host"], 80))     # Use persistent connections here maybe?
             sock.send(request.text)
             response = sock.recv(8024)
             while response != "":
@@ -118,9 +118,6 @@ def fetch_from_cache(URL):
 def proxy_worker(connection):
     proxy = Proxy()
     try:
-        # print >>sys.stderr, 'connection from', client_address
-
-        # Receive the data in small chunks and retransmit it
         request_buffer = connection.recv(1024)
         print "Request received", request_buffer
         request = Transfer()
@@ -146,7 +143,23 @@ def proxy_worker(connection):
         # Clean up the connection
         connection.close()
 
+def on_exit(signal, frame):
+    global CACHE
+    cache_file = open("cache/proxy_cache.db", "w")
+    pickle.dump(CACHE, cache_file)
+    print "\nExiting..."
+    sys.exit(0)
+
 def main():
+    global CACHE
+    try:
+        cache_file = open("cache/proxy_cache.db", "r")
+        CACHE = pickle.load(cache_file)
+    except IOError:
+        CACHE = {}
+
+    signal.signal(signal.SIGINT, on_exit)
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_address = ('localhost', 10000)
@@ -155,12 +168,7 @@ def main():
     sock.listen(10)
     while True:
         connection, client_address = sock.accept()
-        # p = multiprocessing.Process(target=proxy_worker, args=(connection,))
-        # p.start()
-        # processes.append(p)
         thread.start_new_thread( proxy_worker, (connection, ) )
-        # p.join()
-
 
 if __name__=="__main__":
     main()
