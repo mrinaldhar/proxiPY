@@ -13,7 +13,7 @@ import datetime
 import hashlib
 import signal
 import argparse
-
+from stats import *
 
 CACHE = {}
 FILE_CACHE = "cache/proxy_cache.db"
@@ -175,11 +175,13 @@ def proxy_worker(connection, client):
                 # print "OUTSIDE REQUEST~~~~~~~~~~", request.headers["Host"]
                 response = use_external_proxy((EXTERNAL_PROXY.split(":")[0], EXTERNAL_PROXY.split(":")[1]), (request.headers["Host"], 80))
                 connection.sendall(response)
+                weblog.logRequest(request)
                 prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "external")
             else:
                 cached = fetch_from_cache(request.remoteAddr)
                 if cached[0] == True:
                     # print "Just Served from Cache!!"
+                    weblog.logRequest(request)
                     prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
                     connection.sendall(cached[1])
                 else:
@@ -188,6 +190,7 @@ def proxy_worker(connection, client):
                     if success:
                         response.parse_response(response_buffer)
                         connection.sendall(response.text)
+                        weblog.logRequest(request)
                         prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "log")
                         write_to_cache(request.remoteAddr, response.text)
                     else:
@@ -196,6 +199,7 @@ def proxy_worker(connection, client):
 
     finally:
         # Clean up the connection
+        weblog.delActive()
         connection.close()
 
 def on_exit(signal, frame):
@@ -311,6 +315,9 @@ def main():
     except IOError:
         CACHE = {}
 
+    prettyprint("Starting Web server for Stats UI", "warn")
+    prettyprint("Web Server started. You can access ProxyPY stats at http://localhost:5005/", "ok")
+
     signal.signal(signal.SIGINT, on_exit)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -326,6 +333,7 @@ def main():
 
     while True:
         connection, client_address = sock.accept()
+        weblog.addActive()
         thread.start_new_thread( proxy_worker, (connection, client_address, ) )
 
 if __name__=="__main__":
