@@ -71,7 +71,7 @@ class WebStats(object):
 		self.activeThreads -= 1
 
 	def logRequest(self, request):
-		result = {"remoteAddr":request.remoteAddr}
+		result = {"remoteAddr":request.remoteAddr, "timestamp":request.timestamp, "client":request.client, "requestType":request.requestType}
 		self.served.append(result)
 
 weblog = WebStats()

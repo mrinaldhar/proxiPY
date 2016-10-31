@@ -9,14 +9,20 @@
 	<link rel="stylesheet" href="./css/animate.css" />
 	<style>
 		@font-face {
-			src: url("./fonts/myriad.otf");
-			font-family: myriadl;
+			src: url("./fonts/quickbold.otf");
+			font-family: quickbold;
+		}
+    @font-face {
+			src: url("./fonts/exo.otf");
+			font-family: exo;
 		}
 		body, html {
-			font-family: myriadl;
+			font-family: quickbold;
 			-webkit-font-smoothing: antialiased;
 			  -moz-osx-font-smoothing: grayscale;
-        background-color: rgba(0,0,0,0.8);
+        background-color: rgba(0,0,0,0.7);
+        color: white;
+        text-align: center;
 		}
 		h1, h2, h3, h4 {
 			font-weight: normal;
@@ -56,25 +62,81 @@
         }
         .graph {
           width: 100%;
-          position: absolute;
-          right: 0px;
-          left: 0px;
           text-align: center;
         }
         </style>
+        <style>
+          .logo_hero {
+            color: white;
+            font-size: 3em;
+          }
+          .header {
+            position: fixed;
+            top: 0px;
+            left: 0px;
+            width: 100%;
+            text-align: left;
+            padding: 20px;
+          }
+          .footer a {
+            color: orange;
+            text-decoration: none;
+          }
+          .footer {
+            position: fixed;
+            font-family: quickbold;
+            bottom: 0px;
+            left: 0px;
+            width: 100%;
+            background-color: rgba(0,0,0,1);
+            color: rgba(255,255,255,0.7);
+            padding: 10px;
+            text-align: center;
+          }
+          #container {
+            width: 90%;
+            margin: 0 auto;
+            margin-top: 50px;
+          }
+          #container tr td {
+            width: 33%;
+            text-align: center;
+            background-color: rgba(0,0,0,0.3);
+            padding-top: 15px;
+            padding-bottom: 15px;
+          }
+          #container tr .middle {
+            text-align: left;
+          }
+          .btn {
+            background-color: orange;
+            padding: 1px;
+            padding-left: 5px;
+            padding-right: 5px;
+            border-radius: 5px;
+            margin-right: 20px;
+          }
+        </style>
+
 </head>
 <body>
-	<div class="header">
-		<div class="logo_hero"><h1>Hello!</h1></div>
+	<div class="header animated bounceInDown">
+		<div class="logo_hero">proxiPY</div>
 		<ul class="nav">
 
 		</ul>
 	</div>
-   <div class="graph"></div>
-	<div id="container">
-
-HI
-	</div>
+   <div class="graph animated bounceInLeft"></div>
+	<table id="container">
+    <!-- <tr>
+      <th>Timestamp</th>
+      <th>Request</th>
+      <th>Location</th>
+    </tr> -->
+	</table>
+  <div class="footer animated bounceInUp">
+    Designed by <a href="http://mrinaldhar.com">Mrinal Dhar</a>
+  </div>
   <script src="./js/jquery.js"></script>
   <script src="./js/d3.min.js"></script>
   <script>
@@ -101,7 +163,7 @@ HI
               .range([0, width])
 
           var y = d3.scale.linear()
-              .domain([0, 10])
+              .domain([0, 20])
               .range([height, 0])
 
           var line = d3.svg.line()
@@ -136,13 +198,6 @@ HI
           function tick() {
           now = new Date()
 
-              // Add new values
-              // for (var name in groups) {
-              //     var group = groups[name]
-              //     //group.data.push(group.value) // Real values arrive at irregular intervals
-              //     // group.data.push(Math.random() * 10)
-              //     // group.path.attr('d', line)
-              // }
               $.getJSON("/activeThreads", function(data) {
                 groups["threads"].data.push(data["threads"]);
               });
@@ -176,13 +231,14 @@ HI
 
           window.setInterval(function() {
             $.getJSON("/getRequests", function(data) {
-              console.log(data)
+              $.each(data["requests"], function(key, value) {
+                console.log(value);
+                $('#container').prepend("<tr class='animated fadeIn'><td>"+value["timestamp"]+"</td><td class='middle'><span class='btn'>"+value["requestType"]+"</span> "+value["remoteAddr"].substring(0, 100)+"</td><td>"+value["client"][0]+"</td></tr>");
+              });
             });
           }, 500);
 
           </script>
 
 </body>
-
-<!-- <script src="./js/jqueryui.js"></script> -->
 </html>

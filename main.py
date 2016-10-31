@@ -128,10 +128,7 @@ class Proxy(object):
     def process(self, request):
         self.buffer = b''
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # request.headers["Connection"] = "keep-alive"
         request.reassemble()
-        # if request.requestType in "CONNECT POST DELETE":
-            # return (False, "")
         try:
             sock.connect((request.headers["Host"], 80))     # Use persistent connections here maybe?
             sock.send(request.text)
@@ -173,27 +170,28 @@ def proxy_worker(connection, client, sslSock):
         request = Transfer(client)
         request.parse_request(request_buffer)
         if request.valid:
+            request.timestamp = str(datetime.datetime.now())
             if PROXY_QUEUES.has_key(client):
                 PROXY_QUEUES[client] = connection
             if EXTERNAL_PROXY is not None and "iiit.ac.in" not in request.headers["Host"]:
                 cached = fetch_from_cache(request.remoteAddr)
                 if cached[0] == True:
                     weblog.logRequest(request)
-                    prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
+                    prettyprint(request.timestamp + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
                     connection.sendall(cached[1])
                 else:
                     # print "OUTSIDE REQUEST~~~~~~~~~~", request.headers["Host"]
                     response = use_external_proxy((EXTERNAL_PROXY.split(":")[0], int(EXTERNAL_PROXY.split(":")[1])), request)
                     connection.sendall(response)
                     weblog.logRequest(request)
-                    prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "external")
+                    prettyprint(request.timestamp + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "external")
                     write_to_cache(request.remoteAddr, response)
             else:
                 cached = fetch_from_cache(request.remoteAddr)
                 if cached[0] == True:
                     # print "Just Served from Cache!!"
                     weblog.logRequest(request)
-                    prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
+                    prettyprint(request.timestamp + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
                     connection.sendall(cached[1])
                 else:
                     response = Transfer(request.headers["Host"])
@@ -202,7 +200,7 @@ def proxy_worker(connection, client, sslSock):
                         response.parse_response(response_buffer)
                         connection.sendall(response.text)
                         weblog.logRequest(request)
-                        prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "log")
+                        prettyprint(request.timestamp + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "log")
                         write_to_cache(request.remoteAddr, response.text)
                     else:
                         response.invalidate()
