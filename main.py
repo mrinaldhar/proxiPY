@@ -14,12 +14,13 @@ import hashlib
 import signal
 import argparse
 from stats import *
+import ssl
 
 CACHE = {}
 FILE_CACHE = "cache/proxy_cache.db"
 EXTERNAL_PROXY = None
-PROXY_PORT = 10000
-
+PROXY_PORT = 12345
+PROXY_QUEUES = {}
 
 class bcolors:
     EXTERNAL = '\033[96m'
@@ -62,23 +63,26 @@ class Transfer(object):
         self.client = client_address
 
     def parse_request(self, data):
-        if data != "":
-            self.text = data
-            # self.data = data.split('\n\n')[1]
-            data = data.split('\r\n')
-            req = data[0]
-            self.requestType = req.split(' ')[0]
-            self.remoteAddr = req.split(' ')[1]
-            self.HTTPv = req.split(' ')[2]
-            for each in data[1:]:
-                if each == "":
-                    break
-                value = each.split(": ")
-                if len(value) > 1:
-                    self.headers[value[0]] = value[1]
-            self.valid = True
-        else:
-            pass
+        try:
+            if data != "":
+                self.text = data
+                # self.data = data.split('\n\n')[1]
+                data = data.split('\r\n')
+                req = data[0]
+                self.requestType = req.split(' ')[0]
+                self.remoteAddr = req.split(' ')[1]
+                self.HTTPv = req.split(' ')[2]
+                for each in data[1:]:
+                    if each == "":
+                        break
+                    value = each.split(": ")
+                    if len(value) > 1:
+                        self.headers[value[0]] = value[1]
+                self.valid = True
+            else:
+                self.valid = False
+        except:
+            self.valid = False
 
     def parse_response(self, data):
         if data != "":
@@ -113,8 +117,6 @@ class Transfer(object):
         self.text += "\r\n"
         self.text += self.data + "\r\n"
 
-    # def reassemble_using(self, HTTPv, status, )
-
     def invalidate(self):
         self.text = b''
         self.text += "HTTP/1.1" + " " + "500" + " Internal Server Error" + "\r\n\r\n"
@@ -128,8 +130,8 @@ class Proxy(object):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # request.headers["Connection"] = "keep-alive"
         request.reassemble()
-        if request.requestType in "CONNECT POST DELETE":
-            return (False, "")
+        # if request.requestType in "CONNECT POST DELETE":
+            # return (False, "")
         try:
             sock.connect((request.headers["Host"], 80))     # Use persistent connections here maybe?
             sock.send(request.text)
@@ -163,7 +165,7 @@ def fetch_from_cache(URL):
     else:
         return (False, None)
 
-def proxy_worker(connection, client):
+def proxy_worker(connection, client, sslSock):
     proxy = Proxy()
     try:
         request_buffer = connection.recv(1024)
@@ -171,12 +173,21 @@ def proxy_worker(connection, client):
         request = Transfer(client)
         request.parse_request(request_buffer)
         if request.valid:
+            if PROXY_QUEUES.has_key(client):
+                PROXY_QUEUES[client] = connection
             if EXTERNAL_PROXY is not None and "iiit.ac.in" not in request.headers["Host"]:
-                # print "OUTSIDE REQUEST~~~~~~~~~~", request.headers["Host"]
-                response = use_external_proxy((EXTERNAL_PROXY.split(":")[0], EXTERNAL_PROXY.split(":")[1]), (request.headers["Host"], 80))
-                connection.sendall(response)
-                weblog.logRequest(request)
-                prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "external")
+                cached = fetch_from_cache(request.remoteAddr)
+                if cached[0] == True:
+                    weblog.logRequest(request)
+                    prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "cache")
+                    connection.sendall(cached[1])
+                else:
+                    # print "OUTSIDE REQUEST~~~~~~~~~~", request.headers["Host"]
+                    response = use_external_proxy((EXTERNAL_PROXY.split(":")[0], int(EXTERNAL_PROXY.split(":")[1])), request)
+                    connection.sendall(response)
+                    weblog.logRequest(request)
+                    prettyprint(str(datetime.datetime.now()) + "\t" + request.client[0] + "\t" + request.requestType + "\t" + request.remoteAddr, "external")
+                    write_to_cache(request.remoteAddr, response)
             else:
                 cached = fetch_from_cache(request.remoteAddr)
                 if cached[0] == True:
@@ -213,80 +224,63 @@ def on_exit(signal, frame):
     sys.exit(0)
 
 
-def use_external_proxy(eproxy, address):
+def use_external_proxy(eproxy, request):
     s = socket.socket()
     s.connect(eproxy)
     fp = s.makefile('r+')
-    headers = {}
-    fp.write('CONNECT %s:%d HTTP/1.1\r\n' % address)
-    fp.write('\r\n'.join('%s: %s' % (k, v) for (k, v) in headers.items()) + '\r\n\r\n')
+    fp.write(request.text)
     fp.flush()
-    s.send("")
-    # statusline = fp.readline().rstrip('\r\n')
-    # print statusline
-    # if statusline.count(' ') < 2:
-    #     fp.close()
-    #     s.close()
-    #     raise IOError('Bad response')
-    # version, status, statusmsg = statusline.split(' ', 2)
-    # if not version in ('HTTP/1.0', 'HTTP/1.1'):
-    #     fp.close()
-    #     s.close()
-    #     raise IOError('Unsupported HTTP version')
-    # try:
-    #     status = int(status)
-    # except ValueError:
-    #     fp.close()
-    #     s.close()
-    #     raise IOError('Bad response')
+    result = ""
+    statusline = fp.readline().rstrip('\r\n')
+    result += statusline + "\r\n"
+    if statusline.count(' ') < 2:
+        fp.close()
+        s.close()
+        raise IOError('Bad response')
+    version, status, statusmsg = statusline.split(' ', 2)
+    if not version in ('HTTP/1.0', 'HTTP/1.1'):
+        fp.close()
+        s.close()
+        raise IOError('Unsupported HTTP version')
+    try:
+        status = int(status)
+    except ValueError:
+        fp.close()
+        s.close()
+        raise IOError('Bad response')
 
-    # response_headers = {}
-    # while True:
-    #     tl = ''
-    #     l = fp.readline().rstrip('\r\n')
-    #     if l == '':
-    #         break
-    #     if not ':' in l:
-    #         continue
-    #     k, v = l.split(':', 1)
-    #     response_headers[k.strip().lower()] = v.strip()
-    # # length = response_headers["content-length"]
-    # received = 0
+    response_headers = {}
+    while True:
+        tl = ''
+        l = fp.readline().rstrip('\r\n')
+        if l == '':
+            break
+        if not ':' in l:
+            continue
+        result += l + "\r\n"
+        k, v = l.split(':', 1)
+        response_headers[k.strip().lower()] = v.strip()
+    result += "\r\n"
+    received = 0
+    response_data = ""
+    try:
+        length = response_headers["content-length"]
+        while received < int(length):
+            tl = ''
+            l = fp.read(1)
+            response_data += l
+            received += 1
+        result += response_data
+    except KeyError:
+        while True:
+            tl = ''
+            l = fp.read(1).rstrip("\r\n")
+            response_data += l
+            if l == "":
+                break
 
-
-
-    # response_data = ""
-    # while True:
-    #     tl = ''
-    #     l = fp.read(1024)
-    #     response_data += l
-    #     print "LOL"
-    #     if l == "":
-    #         break
-    # print response_data
-    # while True:
-    #     tl = ''
-    #     l = fp.readline()
-    #     response_data += l
-    #     print "OK"
-    #     if l == "\r\n":
-    #         break
-
-
-
-
-    # data = fp.read()
     fp.close()
-    # print (s, status, response_headers)
-    return response_data
-
-    # s.send("GET http://facebook.com HTTP/1.1")
-    # response = s.recv(1024)
-    # while response != "" or response != "\r\n":
-    #     response_data += response
-    #     response = s.recv(1024)
-    #     print response
-    # print response
+    return result
 
 def manage_clArguments():
     args = argparse.ArgumentParser()
@@ -329,12 +323,14 @@ def main():
     sock.bind(server_address)
     sock.listen(10)
 
+    sslSock = ssl.wrap_socket(sock, ssl_version=ssl.PROTOCOL_TLSv1, ciphers="ADH-AES256-SHA")
+
     prettyprint("Proxy is now running and ready to serve requests", "ok")
 
     while True:
         connection, client_address = sock.accept()
         weblog.addActive()
-        thread.start_new_thread( proxy_worker, (connection, client_address, ) )
+        thread.start_new_thread( proxy_worker, (connection, client_address, sslSock ) )
 
 if __name__=="__main__":
     main()
